@@ -1,0 +1,35 @@
+# .gitignore - files git should not track.
+# What it does: ignores Python caches and build output, notebook checkpoints, the large
+# LendingClub CSV (never commit it; Kaggle terms apply), generated tables and figures
+# (regenerate with `python -m src.experiments`), and editor / OS files. The .gitkeep files keep
+# the empty data/ and outputs/ folders in the repository.
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Data: never commit the LendingClub CSV (about 1.6 GB, Kaggle terms apply)
+data/raw/*
+!data/raw/.gitkeep
+data/*.csv
+data/*.csv.gz
+
+# Generated outputs: regenerate with `python -m src.experiments`
+outputs/figures/*
+outputs/tables/*
+!outputs/figures/.gitkeep
+!outputs/tables/.gitkeep
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

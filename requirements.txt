@@ -1,0 +1,17 @@
+# requirements.txt - flat dependency list for people who prefer `pip install -r`.
+# What it does: lists the core packages needed for logistic regression, random forest, the
+# statistics, plots and tests, plus the optional heavy packages (XGBoost, SHAP, PyTorch) that
+# unlock the other models. pyproject.toml is the source of truth; keep the two in sync.
+
+# Core (enough to run the LR / Random Forest pipeline, statistics and tests)
+numpy>=1.26
+pandas>=2.1
+scikit-learn>=1.4
+scipy>=1.11
+matplotlib>=3.8
+pytest>=8
+
+# Optional: install only what you need (see pyproject.toml extras)
+xgboost>=2.0     # XGBoost model            -> pip install -e ".[boost]"
+shap>=0.45       # Tree / Gradient SHAP     -> pip install -e ".[explain]"
+torch>=2.2       # DNN and KAN models       -> pip install -e ".[neural]"

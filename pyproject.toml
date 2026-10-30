@@ -1,0 +1,39 @@
+# pyproject.toml - packaging and tooling configuration.
+# What it does: declares the project name/version, the core dependencies (numpy, pandas,
+# scikit-learn, scipy, matplotlib), the optional extras (boost = XGBoost, explain = SHAP,
+# neural = PyTorch for DNN/KAN, dev = pytest, all = everything), makes `src` installable with
+# `pip install -e .`, and configures pytest (test folder and import path).
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "p2p-credit-risk-validation"
+version = "0.3.0"
+description = "Performance, complexity and explanation-stability validation of ML models for P2P credit risk"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "scikit-learn>=1.4",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+boost = ["xgboost>=2.0"]
+explain = ["shap>=0.45"]
+neural = ["torch>=2.2"]
+dev = ["pytest>=8"]
+all = ["xgboost>=2.0", "shap>=0.45", "torch>=2.2", "pytest>=8"]
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = ["ignore::FutureWarning", "ignore::UserWarning"]
