@@ -19,4 +19,4 @@ scoring          scorecard + Pareto                 experiments     seed grid, H
 visualization    figures                            synthetic       fake data for tests and demos
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "p2p-credit-risk-validation"
-version = "0.3.0"
+version = "0.4.0"
 description = "Performance, complexity and explanation-stability validation of ML models for P2P credit risk"
 readme = "README.md"
 requires-python = ">=3.10"

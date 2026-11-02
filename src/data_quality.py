@@ -10,11 +10,12 @@ Makes the cleaning process auditable instead of implicit. It re-runs the same st
                             vintage cut-off, then the train / test split
 * ``missingness_report``  - per-feature missing rate and number of distinct values
 * ``default_rate_by_year``- loans and default rate per issue year (shows right-censoring of late years)
-* ``data_quality_report`` - runs all of the above, prints them and optionally saves CSVs
+* ``data_quality_report`` - runs all of the above, prints them and optionally saves CSVs;
+                            ``--figure-dir`` also draws the cleaning figures (funnel, status, coverage, censoring)
 
 Run it before any modelling:
 
-    python -m src.data_quality --synthetic
+    python -m src.data_quality --synthetic --out outputs/tables --figure-dir outputs/figures/data_quality
     python -m src.data_quality --csv data/raw/accepted_2007_to_2018Q4.csv
 
 The reasons behind each step are written up in docs/data_cleaning.md.
@@ -134,6 +135,7 @@ def main(argv=None) -> None:
     ap.add_argument("--synthetic", action="store_true", help="use generated data")
     ap.add_argument("--csv", type=Path, default=None)
     ap.add_argument("--out", type=Path, default=None, help="folder for CSV copies of each table")
+    ap.add_argument("--figure-dir", type=Path, default=None, help="folder for data-cleaning figures (omit to skip)")
     args = ap.parse_args(argv)
 
     cfg = ExperimentConfig(csv_path=args.csv) if args.csv else ExperimentConfig()
@@ -142,7 +144,13 @@ def main(argv=None) -> None:
         raw = make_synthetic_lendingclub(8_000, seed=0)
     else:
         raw = pd.read_csv(cfg.csv_path, usecols=USECOLS, low_memory=False)
-    data_quality_report(raw, cfg, args.out)
+    report = data_quality_report(raw, cfg, args.out)
+    if args.figure_dir:
+        import matplotlib
+        matplotlib.use("Agg")
+        from .visualization import save_data_quality_figures
+        paths = save_data_quality_figures(report, args.figure_dir, cfg.max_issue_year, cfg.min_feature_coverage)
+        print(f"\nWrote {len(paths)} data-cleaning figures to {args.figure_dir}")
 
 
 if __name__ == "__main__":

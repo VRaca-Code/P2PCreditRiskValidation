@@ -39,6 +39,16 @@ explanation stability are tested **separately**, then jointly.
 - **Explanations on original features.** SHAP values of one-hot dummies are summed per row back to their source column before taking absolute values, so rankings are comparable across models and with permutation importance.
 - **No expert-assigned interpretability score.** The scorecard uses a measured *explanation stability* instead. Scores are relative (min-max across the compared models), so keep the raw tables beside them.
 
+## Exploratory analysis (before the model comparison)
+
+`src/eda.py` describes the LendingClub portfolio first: default rate by grade, purpose, term, region,
+income, FICO and more (with 95% intervals), loans and defaults by year, Welch / chi-square / Kruskal tests
+reported with effect sizes, a hand-made "risky borrower" rule checked against actual defaults, interest
+charged vs defaults realised per grade, and whether missingness itself signals default. It also shows how
+much the label definition alone changes the default rate. Methods are adapted from public LendingClub and
+Bondora notebooks; docs/eda.md lists what came from where, what is new, and which weaknesses of those
+notebooks are avoided. Bondora is used for methods only.
+
 ## Related work
 
 *Aste et al. (UCL), "P2P Loan acceptance and default prediction with Artificial Intelligence", arXiv 1907.01800 (preprint).*
@@ -55,7 +65,8 @@ pytest -q                               # tests (optional-dependency tests skip 
 
 # Pipeline check on generated data (no download; results are meaningless)
 python -m src.experiments --synthetic --seeds 3 --n-boot 100
-python -m src.data_quality --synthetic
+python -m src.data_quality --synthetic --out outputs/tables --figure-dir outputs/figures/data_quality   # cleaning audit + 4 figures
+python -m src.eda --synthetic --out outputs/tables/eda --figure-dir outputs/figures/eda   # descriptive EDA
 
 # Real analysis: place the Kaggle CSV at data/raw/ (see data/README.md)
 python -m src.data_quality --csv data/raw/accepted_2007_to_2018Q4.csv --out outputs/tables
@@ -77,6 +88,7 @@ src/
   config.py           paths, columns, ExperimentConfig
   preprocessing.py    cleaning, features, temporal split, leakage-safe preprocessor
   data_quality.py     attrition table, status breakdown, missingness, default rate by year
+  eda.py              descriptive EDA: group default rates, effect sizes, rule validation, pricing vs risk
   models.py           factory for LR / RF / XGBoost / DNN / KAN (optional deps are lazy)
   neural.py, torch_nets.py   sklearn-style wrapper, MLP and KAN layers (PyTorch)
   metrics.py          ROC/PR-AUC, KS, Brier, ECE, threshold tables
@@ -102,7 +114,7 @@ outputs/{tables,figures}   generated, git-ignored
 `feature_set_comparison.csv`. `src.data_quality --out DIR` writes the `data_quality_*.csv` audit tables.
 `outputs/tables/robustness_{psi,stress,sensitivity,backtest}.csv` hold the drift, stress, sensitivity and
 chronological-backtest results (skip with `--no-robustness`).
-`outputs/figures/` (written automatically; skip with `--no-figures`), up to 20 PNGs:
+`outputs/figures/data_quality/` (cleaning, 4 PNGs), `outputs/figures/eda/` (EDA, 10 PNGs) and `outputs/figures/` (written automatically; skip with `--no-figures`), up to 20 PNGs:
 - **Hypotheses:** equivalence forest (H1), explanation shift (H2), SHAP rank-agreement heatmap, per-seed boxplots
 - **Performance:** ROC, precision-recall, calibration, confusion matrices, precision/recall vs threshold
 - **Explanations:** importance bars per model, logistic-regression coefficients

@@ -10,6 +10,12 @@ two-axis trade-off scatter (``plot_tradeoff``) and the relative-scorecard radar
 DNN/KAN training curves, logistic-regression coefficients, global importance bars, per-seed
 boxplots, SHAP rank-agreement heatmap, sensitivity / stress / backtest / PSI line and bar charts,
 a 2x2 trade-off dashboard and the with/without-lender-score comparison.
+EDA figures (v0.4.0, data from eda.py): loans and default rate by year, default rate by group,
+effect sizes, univariate correlation, pricing vs realised risk, missingness signal and the
+label-definition comparison, numeric distributions by outcome, correlation heatmap and outlier
+shares; ``save_eda_figures`` writes them. Data-cleaning figures (attrition funnel, loan-status
+breakdown, missingness with the coverage cut-off, censoring and the vintage cut-off) are written by
+``save_data_quality_figures`` from ``data_quality.data_quality_report`` output.
 ``save_all`` writes the full set of PNGs from ``experiments.run_all`` output; each figure is
 wrapped so one failure (or a missing optional dependency) never stops the others.
 
@@ -464,6 +470,316 @@ def plot_feature_set_comparison(comparison: pd.DataFrame, path=None, metric: str
     ax.set_title("Effect of the lender's own score (light = without, solid = with)", loc="left", fontsize=12)
     _style(ax, "y")
     return _finish(fig, path)
+
+
+# ----------------------------------------------------------------------------- EDA figures (v0.4.0)
+def plot_year_overview(vol: pd.DataFrame, path=None):
+    """Loans per year (bars) and default rate per year (line) as two panels, not a dual axis."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+    axes[0].bar(vol["Issue_year"], vol["Loans"], color=INK_2, alpha=0.55, width=0.7)
+    axes[0].set_title("Resolved loans by issue year", loc="left", fontsize=11); axes[0].set_ylabel("Loans")
+    axes[1].plot(vol["Issue_year"], vol["Default_rate"] * 100, "-o", color=BLUE, linewidth=2, markersize=5)
+    axes[1].set_title("Default rate by issue year", loc="left", fontsize=11); axes[1].set_ylabel("Default rate (%)")
+    axes[1].set_ylim(bottom=0)
+    for ax in axes:
+        ax.set_xlabel("Issue year"); ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+        _style(ax, "y")
+    fig.text(0.01, -0.02, "A falling rate in the latest years usually means right-censoring (loans not yet finished), not safer lending.",
+             fontsize=8.5, color=INK_2)
+    return _finish(fig, path)
+
+
+def plot_default_rate_groups(groups: pd.DataFrame, path=None, variables=None):
+    """Default rate per group with 95% intervals; one small panel per variable, dashed line = overall rate."""
+    variables = [v for v in (variables or groups["Variable"].unique()) if v in set(groups["Variable"])]
+    ncol = 3
+    nrow = int(np.ceil(len(variables) / ncol))
+    overall = float((groups["Defaults"].sum()) / groups["Loans"].sum()) if len(groups) else 0
+    base = groups.groupby("Variable")[["Defaults", "Loans"]].sum()
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.6 * ncol, 3.3 * nrow), squeeze=False)
+    for ax, v in zip(axes.ravel(), variables):
+        g = groups[groups["Variable"] == v].reset_index(drop=True)
+        rate = g["Default_rate"] * 100
+        ax.bar(range(len(g)), rate, color=BLUE, width=0.65,
+               yerr=[(g["Default_rate"] - g["ci95_low"]) * 100, (g["ci95_high"] - g["Default_rate"]) * 100],
+               error_kw={"ecolor": INK_2, "elinewidth": 1})
+        ax.axhline(base.loc[v, "Defaults"] / base.loc[v, "Loans"] * 100, color=INK_2, linewidth=1, linestyle="--")
+        labels = [str(int(x)) if isinstance(x, float) and float(x).is_integer() else str(x) for x in g["Group"]]
+        rotate = len(g) > 5 or max(len(t) for t in labels) > 7
+        ax.set_xticks(range(len(g)), labels, fontsize=8, rotation=35 if rotate else 0, ha="right" if rotate else "center")
+        ax.set_title(v.replace("_", " "), loc="left", fontsize=10.5); ax.set_ylabel("Default rate (%)")
+        _style(ax, "y")
+    for ax in axes.ravel()[len(variables):]:
+        ax.set_visible(False)
+    fig.suptitle("Default rate by group (bars ±95% interval, dashed = overall)", x=0.01, ha="left", fontsize=12)
+    return _finish(fig, path)
+
+
+def plot_effect_sizes(tests: pd.DataFrame, path=None):
+    """Effect size of each test (not p-values): how big the default/paid difference really is."""
+    t = tests[tests["Test"] != "Kruskal-Wallis (int_rate across grades)"].copy()
+    t["size"] = t["Effect_size"].abs()
+    t = t.sort_values("size")
+    fig, ax = plt.subplots(figsize=(8, 0.36 * len(t) + 1.8))
+    colors = [BLUE if m == "Cohen's d" else INK_2 for m in t["Effect_measure"]]
+    ax.barh(t["Variable"], t["size"], color=colors, height=0.6)
+    for yi, (v, lab) in enumerate(zip(t["size"], t["Effect_label"])):
+        ax.annotate(lab, (v, yi), xytext=(5, 0), textcoords="offset points", va="center", fontsize=8.5, color=INK_2)
+    ax.set_xlabel("|effect size|   (blue = Cohen's d for numeric, grey = Cramér's V for categorical)")
+    ax.set_title("How different are defaulted and paid loans?", loc="left", fontsize=12)
+    _style(ax, "x")
+    return _finish(fig, path)
+
+
+def plot_univariate_correlation(corr: pd.DataFrame, path=None, top: int = 15):
+    """Spearman correlation of each numeric feature with default (one-at-a-time view)."""
+    c = corr.head(top)[::-1]
+    fig, ax = plt.subplots(figsize=(8, 0.34 * len(c) + 1.6))
+    ax.barh(c["Feature"], c["Spearman_with_default"], color=BLUE, height=0.6)
+    ax.axvline(0, color=INK_2, linewidth=1)
+    ax.set_xlabel("Spearman correlation with default (right = higher in defaulted loans)")
+    ax.set_title("Univariate association with default", loc="left", fontsize=12)
+    _style(ax, "x")
+    return _finish(fig, path)
+
+
+def plot_pricing_vs_risk(pricing: pd.DataFrame, path=None):
+    """Interest charged vs default rate realised, per lender grade (naive: no recoveries or timing)."""
+    fig, ax = plt.subplots(figsize=(7, 4.6))
+    x = np.arange(len(pricing))
+    ax.plot(x, pricing["Mean_interest_rate"], "-o", color=BLUE, linewidth=2, markersize=6, label="Mean interest rate")
+    ax.plot(x, pricing["Default_rate_pct"], "-o", color=MODEL_COLORS["Random Forest"], linewidth=2, markersize=6, label="Realised default rate")
+    ax.annotate("interest rate", (x[-1], pricing["Mean_interest_rate"].iloc[-1]), xytext=(6, 0), textcoords="offset points", fontsize=9, color=INK, va="center")
+    ax.annotate("default rate", (x[-1], pricing["Default_rate_pct"].iloc[-1]), xytext=(6, 0), textcoords="offset points", fontsize=9, color=INK, va="center")
+    ax.set_xticks(x, pricing["grade"]); ax.set_xlabel("Lender grade (A = safest)"); ax.set_ylabel("Percent")
+    ax.set_title("Is higher risk priced in proportion? (naive, ignores recoveries)", loc="left", fontsize=11.5)
+    ax.set_xlim(-0.3, len(x) - 0.3 + 0.6)
+    _style(ax, "y")
+    return _finish(fig, path)
+
+
+def plot_missingness_signal(miss: pd.DataFrame, path=None, top: int = 12):
+    """Default-rate gap when a feature is missing vs observed (percentage points)."""
+    m = miss.head(top)[::-1]
+    fig, ax = plt.subplots(figsize=(8, 0.36 * len(m) + 1.7))
+    ax.barh(m["Feature"], m["Gap_pct_points"], color=BLUE, height=0.6)
+    ax.axvline(0, color=INK_2, linewidth=1)
+    ax.set_xlabel("Default rate when missing − when observed (percentage points)")
+    ax.set_title("Is missingness itself a signal?", loc="left", fontsize=12)
+    _style(ax, "x")
+    return _finish(fig, path)
+
+
+def plot_label_definitions(labels: pd.DataFrame, path=None):
+    """Default rate and loan count under different label definitions."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 3.8), sharey=True)
+    names = [d.replace(": ", ":\n") for d in labels["Definition"]]
+    axes[0].barh(names, labels["Default_rate"] * 100, color=BLUE, height=0.55)
+    axes[0].set_xlabel("Default rate (%)"); axes[0].set_title("Default rate", loc="left", fontsize=11)
+    axes[1].barh(names, labels["Loans"], color=INK_2, alpha=0.6, height=0.55)
+    axes[1].set_xlabel("Loans included"); axes[1].set_title("Loans in the sample", loc="left", fontsize=11)
+    for ax in axes:
+        _style(ax, "x")
+    return _finish(fig, path)
+
+
+def plot_numeric_distributions(frame: pd.DataFrame, path=None, features=None):
+    """Distribution of key numeric features for paid vs defaulted loans (1st-99th percentile, shared bins)."""
+    pool = features or ["int_rate", "loan_amnt", "annual_inc", "dti", "revol_util", "fico_score", "revol_bal", "open_acc", "total_acc"]
+    feats = [f for f in pool if f in frame.columns]
+    d = frame.copy()
+    if "int_rate" in d:
+        d["int_rate"] = pd.to_numeric(d["int_rate"].astype(str).str.rstrip("%"), errors="coerce")
+    ncol = 3
+    nrow = int(np.ceil(len(feats) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.6 * ncol, 3.0 * nrow), squeeze=False)
+    for ax, f in zip(axes.ravel(), feats):
+        x = d[f].dropna()
+        log = f in {"annual_inc", "revol_bal"}
+        lo, hi = x.quantile([0.01, 0.99])
+        uniq = np.sort(x[(x >= lo) & (x <= hi)].unique())
+        if len(uniq) <= 40:  # discrete feature: one bin per value, edges halfway between values
+            step = np.diff(uniq).min() if len(uniq) > 1 else 1.0
+            bins = np.append(uniq - step / 2, uniq[-1] + step / 2)
+        else:
+            bins = np.geomspace(max(lo, 1), hi, 36) if log else np.linspace(lo, hi, 36)
+        for outcome, color, lab in ((0, BLUE, "paid"), (1, MODEL_COLORS["Random Forest"], "defaulted")):
+            v = d.loc[d["loan_status"] == outcome, f].dropna()
+            ax.hist(v, bins=bins, density=True, histtype="step", linewidth=2, color=color, label=lab)
+        if log:
+            ax.set_xscale("log")
+        ax.set_title(f + (" (log scale)" if log else ""), loc="left", fontsize=10.5); ax.set_ylabel("Density")
+        _style(ax, "y")
+    axes.ravel()[0].legend(frameon=False, fontsize=9)
+    for ax in axes.ravel()[len(feats):]:
+        ax.set_visible(False)
+    fig.suptitle("Distributions: paid vs defaulted loans (1st-99th percentile)", x=0.01, ha="left", fontsize=12)
+    return _finish(fig, path)
+
+
+def plot_correlation_heatmap(frame: pd.DataFrame, path=None, max_features: int = 14):
+    """Spearman correlation between numeric features (not just with default): shows redundancy."""
+    cols = [c for c in frame.select_dtypes(include="number").columns
+            if c not in {"loan_status", "year", "fico_range_low", "fico_range_high"}]
+    d = frame[cols].copy()
+    keep = d.notna().mean().sort_values(ascending=False).index[:max_features]
+    corr = d[keep].corr(method="spearman")
+    fig, ax = plt.subplots(figsize=(0.62 * len(keep) + 3, 0.6 * len(keep) + 2.2))
+    im = ax.imshow(corr, cmap="RdBu_r", vmin=-1, vmax=1)
+    for i in range(len(keep)):
+        for j in range(len(keep)):
+            ax.text(j, i, f"{corr.iloc[i, j]:.2f}", ha="center", va="center", fontsize=7.5,
+                    color="white" if abs(corr.iloc[i, j]) > 0.6 else INK)
+    ax.set_xticks(range(len(keep)), keep, rotation=45, ha="right", fontsize=8.5)
+    ax.set_yticks(range(len(keep)), keep, fontsize=8.5)
+    ax.tick_params(length=0)
+    for side in ax.spines.values():
+        side.set_visible(False)
+    ax.set_title("Spearman correlation between numeric features", loc="left", fontsize=11.5)
+    fig.colorbar(im, ax=ax, shrink=0.8)
+    return _finish(fig, path)
+
+
+def plot_outlier_summary(out: pd.DataFrame, path=None, top: int = 14):
+    """Share of values outside the 1.5 x IQR fences per numeric feature (kept, not removed)."""
+    o = out.head(top)[::-1]
+    fig, ax = plt.subplots(figsize=(8, 0.34 * len(o) + 1.8))
+    ax.barh(o["Feature"], o["Outside_1.5_IQR_share"] * 100, color=BLUE, height=0.6)
+    for yi, mx in enumerate(o["Max_over_median"]):
+        ax.annotate(f"max = {mx:,.1f}x median" if np.isfinite(mx) else "", (o["Outside_1.5_IQR_share"].iloc[yi] * 100, yi),
+                    xytext=(5, 0), textcoords="offset points", va="center", fontsize=8, color=INK_2)
+    ax.set_xlabel("Share of loans outside the 1.5 x IQR fences (%)  -  outliers are kept; see docs/data_cleaning.md")
+    ax.set_title("Outliers per numeric feature", loc="left", fontsize=12)
+    _style(ax, "x")
+    return _finish(fig, path)
+
+
+# ----------------------------------------------------------------------------- data-cleaning figures
+def plot_attrition(att: pd.DataFrame, path=None):
+    """Rows after each cleaning step (funnel); removed rows and default rate are labelled on each bar."""
+    a = att.iloc[::-1].reset_index(drop=True)
+    fig, ax = plt.subplots(figsize=(10, 0.55 * len(a) + 1.8))
+    ax.barh(a["Step"], a["Rows"], color=BLUE, height=0.6)
+    top = float(a["Rows"].max())
+    for yi, r in a.iterrows():
+        parts = [f"{int(r.Rows):,}"]
+        if pd.notna(r.Rows_removed) and r.Rows_removed > 0:
+            parts.append(f"-{int(r.Rows_removed):,} removed")
+        if pd.notna(r.Default_rate):
+            parts.append(f"default {r.Default_rate:.1%}")
+        ax.annotate("  |  ".join(parts), (r.Rows, yi), xytext=(6, 0), textcoords="offset points", va="center", fontsize=8.5, color=INK)
+    ax.set_xlim(0, top * 1.55)
+    ax.set_xlabel("Loans remaining")
+    ax.set_title("Data cleaning: how many loans survive each step", loc="left", fontsize=12)
+    _style(ax, "x")
+    return _finish(fig, path)
+
+
+def plot_status_breakdown(status: pd.DataFrame, path=None):
+    """Every raw loan_status: blue = kept (resolved), grey = dropped (unresolved or unknown)."""
+    s = status.sort_values("Rows")
+    fig, ax = plt.subplots(figsize=(9, 0.42 * len(s) + 1.8))
+    ax.barh(s["Raw_status"].astype(str), s["Rows"], color=[BLUE if k else INK_2 for k in s["Kept"]], height=0.6)
+    for yi, (n, sh, k) in enumerate(zip(s["Rows"], s["Share"], s["Kept"])):
+        ax.annotate(f"{n:,} ({sh:.1%}) {'kept' if k else 'dropped'}", (n, yi), xytext=(5, 0), textcoords="offset points",
+                    va="center", fontsize=8.5, color=INK)
+    ax.set_xlim(0, s["Rows"].max() * 1.45)
+    ax.set_xlabel("Loans")
+    ax.set_title("Raw loan status: what is kept as the target (blue) and what is dropped (grey)", loc="left", fontsize=11.5)
+    _style(ax, "x")
+    return _finish(fig, path)
+
+
+def plot_missingness(missing: pd.DataFrame, threshold: float = 0.70, sparse=(), path=None, top: int = 20):
+    """Share of TRAINING loans with a value, per feature; features below the coverage cut-off are dropped."""
+    m = missing.copy()
+    m["coverage"] = 1 - m["missing_rate"]
+    m = m.sort_values("coverage").head(top)
+    dropped = set(sparse)
+    fig, ax = plt.subplots(figsize=(8.5, 0.34 * len(m) + 1.8))
+    ax.barh(m.index.astype(str), m["coverage"] * 100,
+            color=[MODEL_COLORS["Random Forest"] if f in dropped else BLUE for f in m.index], height=0.6)
+    ax.axvline(threshold * 100, color=INK, linewidth=1, linestyle="--")
+    ax.annotate(f"cut-off {threshold:.0%}", (threshold * 100, len(m) - 0.4), xytext=(4, 0), textcoords="offset points", fontsize=8.5, color=INK)
+    ax.set_xlim(0, 105)
+    ax.set_xlabel("Training loans with a value (%)   -   orange = dropped for low coverage")
+    ax.set_title("Feature coverage and the sparse-feature filter", loc="left", fontsize=12)
+    _style(ax, "x")
+    return _finish(fig, path)
+
+
+def plot_censoring(by_year: pd.DataFrame, cutoff: int | None, path=None):
+    """Default rate and loan count per issue year, with the vintage cut-off and the dropped years shaded."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+    for ax, col, lab, scale in ((axes[0], "Loans", "Resolved loans", 1), (axes[1], "Default_rate", "Default rate (%)", 100)):
+        ax.plot(by_year["Issue_year"], by_year[col] * scale, "-o", color=BLUE if col == "Default_rate" else INK_2, linewidth=2, markersize=5)
+        if cutoff is not None:
+            ax.axvspan(cutoff + 0.5, by_year["Issue_year"].max() + 0.5, color=INK_2, alpha=0.12, linewidth=0)
+            ax.axvline(cutoff + 0.5, color=INK, linewidth=1, linestyle="--")
+        ax.set_ylabel(lab); ax.set_xlabel("Issue year")
+        ax.set_ylim(0, float((by_year[col] * scale).max()) * 1.12)
+        ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+        _style(ax, "y")
+    if cutoff is not None:
+        axes[1].annotate("dropped:\nright-censored", (cutoff + 0.6, axes[1].get_ylim()[1] * 0.9), fontsize=8.5, color=INK_2, va="top")
+    axes[0].set_title("Resolved loans per year", loc="left", fontsize=11)
+    axes[1].set_title("Default rate per year", loc="left", fontsize=11)
+    return _finish(fig, path)
+
+
+def save_data_quality_figures(report: dict, figure_dir: Path, max_issue_year: int | None = None,
+                              min_coverage: float = 0.70) -> list[Path]:
+    """Write the data-cleaning figures from ``data_quality.data_quality_report`` output."""
+    import warnings
+    figure_dir = Path(figure_dir)
+    sparse = report.get("sparse_features", pd.DataFrame({"Feature": []}))["Feature"].tolist()
+    jobs = [
+        (plot_status_breakdown, (report["status_breakdown"],), "dq_status_breakdown.png"),
+        (plot_attrition, (report["attrition"],), "dq_attrition.png"),
+        (plot_missingness, (report["missingness"], min_coverage, sparse), "dq_missingness.png"),
+        (plot_censoring, (report["default_rate_by_year"], max_issue_year), "dq_censoring.png"),
+    ]
+    written = []
+    for fn, args, name in jobs:
+        try:
+            plt.close(fn(*args, path=figure_dir / name))
+            written.append(figure_dir / name)
+        except Exception as exc:
+            plt.close("all")
+            warnings.warn(f"Data-quality figure {name} skipped ({type(exc).__name__}: {exc})")
+    return written
+
+
+def save_eda_figures(report: dict, figure_dir: Path) -> list[Path]:
+    """Write the EDA figure set from ``eda.eda_report`` output; one failure never stops the rest."""
+    import warnings
+    figure_dir = Path(figure_dir)
+    jobs = [
+        (plot_label_definitions, "label_definitions", "eda_label_definitions.png"),
+        (plot_year_overview, "volume_by_year", "eda_year_overview.png"),
+        (plot_default_rate_groups, "default_rate_groups", "eda_default_rate_groups.png"),
+        (plot_effect_sizes, "hypothesis_tests", "eda_effect_sizes.png"),
+        (plot_univariate_correlation, "numeric_correlation", "eda_univariate_correlation.png"),
+        (plot_pricing_vs_risk, "pricing_vs_realised_risk", "eda_pricing_vs_risk.png"),
+        (plot_missingness_signal, "missingness_informativeness", "eda_missingness_signal.png"),
+    ]
+    jobs += [
+        (plot_outlier_summary, "outlier_summary", "eda_outliers.png"),
+        (plot_numeric_distributions, "frame", "eda_distributions.png"),
+        (plot_correlation_heatmap, "frame", "eda_correlation_heatmap.png"),
+    ]
+    written = []
+    for fn, key, name in jobs:
+        table = report.get(key)
+        if table is None or not len(table):
+            continue
+        try:
+            plt.close(fn(table, path=figure_dir / name))
+            written.append(figure_dir / name)
+        except Exception as exc:
+            plt.close("all")
+            warnings.warn(f"EDA figure {name} skipped ({type(exc).__name__}: {exc})")
+    return written
 
 
 def save_all(result: dict, figure_dir: Path) -> list[Path]:
