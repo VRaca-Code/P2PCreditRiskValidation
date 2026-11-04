@@ -64,23 +64,42 @@ def bootstrap_p_value(boot: np.ndarray, null: float = 0.0) -> float:
     hi = (np.sum(boot >= null) + 1) / (len(boot) + 1)
     return float(min(1.0, 2 * min(lo, hi)))
 
+def tost_equivalence(boot, margin, alpha=0.05):
+    """Bootstrap-based equivalence assessment using two one-sided tail tests."""
+    boot = np.asarray(boot, dtype=float)
+    boot = boot[np.isfinite(boot)]
 
-def tost_equivalence(boot: np.ndarray, margin: float, alpha: float = 0.05) -> dict:
-    """TOST via the (1 - 2*alpha) bootstrap interval: equivalent iff it lies inside (-margin, +margin).
+    if len(boot) == 0:
+        raise ValueError("No valid bootstrap samples")
+    if margin <= 0:
+        raise ValueError("Equivalence margin must be positive")
 
-    Verdict is one of "equivalent", "different" (the whole interval is beyond the
-    margin on one side) or "inconclusive".
-    """
-    lo, hi = np.percentile(boot, [100 * alpha, 100 * (1 - alpha)])
-    if lo > -margin and hi < margin:
+    ci_low, ci_high = np.percentile(
+        boot, [100 * alpha, 100 * (1 - alpha)]
+    )
+
+    # Bootstrap tail estimates for the two equivalence boundaries.
+    # These are descriptive approximations, not fully calibrated TOST p-values.
+    p_lower = (np.sum(boot <= -margin) + 1) / (len(boot) + 1)
+    p_upper = (np.sum(boot >= margin) + 1) / (len(boot) + 1)
+
+    equivalent = ci_low > -margin and ci_high < margin
+
+    if equivalent:
         verdict = "equivalent"
-    elif lo >= margin or hi <= -margin:
+    elif ci_low >= margin or ci_high <= -margin:
         verdict = "different"
     else:
         verdict = "inconclusive"
-    return {"ci_low": float(lo), "ci_high": float(hi), "verdict": verdict,
-            "equivalent": verdict == "equivalent"}
 
+    return {
+        "ci_low": float(ci_low),
+        "ci_high": float(ci_high),
+        "p_lower_approx": float(p_lower),
+        "p_upper_approx": float(p_upper),
+        "equivalent": bool(equivalent),
+        "verdict": verdict,
+    }
 
 def holm_adjust(p_values) -> np.ndarray:
     """Holm-Bonferroni adjusted p-values (monotone, capped at 1)."""
