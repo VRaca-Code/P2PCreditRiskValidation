@@ -244,7 +244,7 @@ def run_hypothesis_tests(grid: dict, cfg: ExperimentConfig, verbose: bool = True
             print(f"  H1 bootstrap {a} vs {b}")
         res = crossed_bootstrap_diff(grid["y_test"], grid["probs"][a], grid["probs"][b],
                                      "pr_auc", cfg.n_boot, seed=cfg.seeds[0] + i)
-        tost = tost_equivalence(res["boot"], cfg.pr_auc_margin, cfg.alpha)
+        tost = tost_equivalence(res["boot"], cfg.pr_auc_margin, cfg.alpha / len(pairs))
         h1.append({"Model_A": a, "Model_B": b, "PR_AUC_diff": res["observed"],
                    "ci90_low": tost["ci_low"], "ci90_high": tost["ci_high"],
                    "p_value": bootstrap_p_value(res["boot"]), "Verdict": tost["verdict"],
