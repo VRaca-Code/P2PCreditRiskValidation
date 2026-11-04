@@ -240,7 +240,18 @@ def run_hypothesis_tests(grid: dict, cfg: ExperimentConfig, verbose: bool = True
         .groupby(["Model", "Seed"])["Method"]
         .agg(lambda values: set(values))
     )
+    expected_runs = pd.MultiIndex.from_product(
+    [models, cfg.seeds],
+    names=["Model", "Seed"]
+)
 
+missing_runs = expected_runs.difference(method_by_run.index)
+
+if len(missing_runs) > 0:
+    raise ValueError(
+        f"Missing explanation results for model/seed runs: "
+        f"{missing_runs.tolist()}"
+    )
     inconsistent_runs = method_by_run[
         method_by_run.apply(lambda methods: len(methods) != 1)
     ]
